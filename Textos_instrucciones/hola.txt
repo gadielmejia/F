@@ -1,0 +1,99 @@
+
+
+py --version
+
+py -m venv venv 
+
+source venv/Scripts/activate
+
+
+
+Instalar flask:
+    python -m pip install flask
+Instalamos dependencias:
+    python -m pip install flask-sqlalchemy
+    python -m pip install marshmallow_sqlalchemy
+    python -m pip install flask-migrate
+    python -m pip install flask-mysqldb  
+    python -m pip install pymysql
+    pip install python-dotenv
+    pip install bcrypt
+    python -m pip install flask-bcrypt
+    pip install flask-cors
+
+
+//Comando para instalar todas las dependencias 
+con un solo comando de git//
+
+    python -m pip install flask-sqlalchemy && \
+    python -m pip install marshmallow_sqlalchemy && \
+    python -m pip install flask-migrate && \
+    python -m pip install flask-mysqldb && \
+    python -m pip install pymysql && \
+    pip install python-dotenv && \
+    pip install bcrypt && \
+    python -m pip install flask-bcrypt && \
+    pip install flask-cors
+    
+    //Se ejecuta este comando cuando no
+    esta el archivo de los requirements.txt//
+
+pip freeze > requirements.txt
+
+
+creo la base de datos para poder configurar el .env 
+.env:
+    
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=
+MYSQL_DATABASE=rentstyle
+SECRET_KEY=una_clave_secreta_cualquiera_123
+
+CLOUDINARY_URL=CLOUDINARY_URL=cloudinary://258274483883165:-9_1SiPXqapF976QeFzzIyF3wFg@dkl6c2jk7
+CLOUDINARY_CLOUD_NAME=dkl6c2jk7
+CLOUDINARY_API_KEY=258274483883165
+CLOUDINARY_API_SECRET=-9_1SiPXqapF976QeFzzIyF3wFg
+CLOUDINARY_UPLOAD_FOLDER=RentStyle
+
+ 
+
+Creamos el archivo requirements.txt
+    pip freeze > requirements.txt
+
+
+
+    
+//Borrar migrations//
+
+1. Borrar migrations
+2. Borrar base de datos del workbench
+3. Volverla a crear en workbench
+4.
+    flask db init
+5. 
+    flask db migrate
+6. 
+    flask db upgrade
+
+
+//Crea el Administrador// 
+--Tiene que crearce despues de hacer los comando de flask db--
+
+python seed.py
+
+
+instalar JWT 
+    pip install Flask-JWT-Extended
+
+Volvemos a ejecutar este comando, lo que hace es actializarlo.
+pip freeze > requirements.txt
+
+Para iniciar backend:
+python run.py
+
+
+Para desactivar el entorno es:
+    deactivate
+

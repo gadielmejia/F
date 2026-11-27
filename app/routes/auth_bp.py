@@ -1,0 +1,105 @@
+import hashlib
+from datetime import datetime, timedelta
+
+import jwt
+from flask import Blueprint, current_app, request
+from sqlalchemy import func
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from app.models.usuarios import Usuarios
+from app.utils.response import response_error, response_success, serialize_model
+
+auth_bp = Blueprint("auth", __name__, url_prefix="/api")
+
+
+def is_sha256_hash(value):
+    if not isinstance(value, str):
+        return False
+    value = value.lower()
+    return len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
+def hash_password(value):
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def normalize_role_name(role_name):
+    if not isinstance(role_name, str):
+        return "user"
+
+    role_name = role_name.strip().lower()
+    if role_name in ["admin", "administrador"]:
+        return "admin"
+    if role_name == "empleado":
+        return "empleado"
+    return "user"
+
+
+def generate_token(usuario):
+    payload = {
+        "idUsuario": usuario.idUsuario,
+        "correo": usuario.correo,
+        "rol": normalize_role_name(usuario.rol.nombre if usuario.rol else None),
+        "exp": datetime.utcnow() + timedelta(hours=8),
+    }
+    return jwt.encode(payload, current_app.config["SECRET_KEY"], algorithm="HS256")
+
+
+@auth_bp.route("/login", methods=["POST"])
+def login():
+    try:
+        data = request.get_json()
+        if not data or "correo" not in data or "Contrasena" not in data:
+            return response_error("Correo y contraseña son requeridos", 400)
+
+        correo = data["correo"].strip().lower()
+        usuario = Usuarios.query.filter(func.lower(Usuarios.correo) == correo).first()
+        if not usuario:
+            return response_error("Correo o contraseña incorrectos", 401)
+
+        password = data["Contrasena"]
+        password_valid = False
+
+        if usuario.Contrasena.startswith(("scrypt:", "pbkdf2:", "bcrypt:")):
+            password_valid = check_password_hash(usuario.Contrasena, password)
+        elif is_sha256_hash(usuario.Contrasena):
+            password_valid = hash_password(password) == usuario.Contrasena
+        else:
+            password_valid = usuario.Contrasena == password
+
+        if not password_valid:
+            return response_error("Correo o contraseña incorrectos", 401)
+
+        # Actualizar a hash seguro si el registro estaba en un formato antiguo SHA-256
+        if is_sha256_hash(usuario.Contrasena) and password_valid:
+            usuario.Contrasena = generate_password_hash(password)
+            usuario.save()
+
+        token = generate_token(usuario)
+        user_data = serialize_model(usuario, exclude_fields=["Contrasena"])
+        user_data["rol_nombre"] = usuario.rol.nombre if usuario.rol else None
+        user_data["role"] = normalize_role_name(user_data["rol_nombre"])
+
+        return response_success({"token": token, "usuario": user_data}, "Login exitoso")
+
+    except Exception as e:
+        return response_error(str(e), 500)
+
+
+@auth_bp.route("/verify-token", methods=["GET"])
+def verify_token():
+    try:
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return response_error("Token requerido", 401)
+
+        token = auth_header.split(" ")[1]
+        payload = jwt.decode(
+            token, current_app.config["SECRET_KEY"], algorithms=["HS256"]
+        )
+        return response_success(payload, "Token válido")
+
+    except jwt.ExpiredSignatureError:
+        return response_error("Token expirado", 401)
+    except jwt.InvalidTokenError:
+        return response_error("Token inválido", 401)

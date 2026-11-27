@@ -1,0 +1,75 @@
+from flask import Flask
+from flask_cors import CORS
+from flask_migrate import Migrate
+
+from app.config.settings import Config
+from app.database.database import db
+from app.routes.health_bp import health_bp
+from app.utils.cloudinary_utils import init_cloudinary
+
+
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object(Config)
+    init_cloudinary(app)
+    db.init_app(app)
+
+    CORS(
+        app,
+        resources={
+            r"/api/*": {
+                "origins": "*",
+                "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+                "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+                "expose_headers": ["Content-Type", "Authorization"],
+            }
+        },
+        supports_credentials=False,
+        automatic_options=True,
+    )
+    Migrate(app, db)
+
+    from app.models import (  # noqa: F401
+        AuditEvent,
+        Categoria,
+        Cita,
+        Comprobante,
+        Detalle_Reserva,
+        Inventario,
+        Prenda,
+        Reserva,
+        Roles,
+        Usuarios,
+    )
+    from app.models.audit_event import register_audit_listeners
+
+    register_audit_listeners()
+
+    # Registrar Blueprints
+    from app.routes.auth_bp import auth_bp
+    from app.routes.categorias_bp import categorias_bp
+    from app.routes.citas_bp import citas_bp
+    from app.routes.comprobantes_bp import comprobantes_bp
+    from app.routes.home_bp import home_bp
+    from app.routes.inventario_bp import inventario_bp
+    from app.routes.lotes_bp import lotes_bp
+    from app.routes.prendas_bp import prendas_bp
+    from app.routes.reports_bp import reports_bp
+    from app.routes.reservas_bp import reservas_bp
+    from app.routes.roles_bp import roles_bp
+    from app.routes.usuarios_bp import usuarios_bp
+
+    app.register_blueprint(home_bp)
+    app.register_blueprint(roles_bp)
+    app.register_blueprint(usuarios_bp)
+    app.register_blueprint(prendas_bp)
+    app.register_blueprint(reservas_bp)
+    app.register_blueprint(categorias_bp)
+    app.register_blueprint(inventario_bp)
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(citas_bp)
+    app.register_blueprint(comprobantes_bp)
+    app.register_blueprint(lotes_bp)
+    app.register_blueprint(health_bp)
+    app.register_blueprint(reports_bp)
+    return app
