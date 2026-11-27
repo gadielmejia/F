@@ -4,6 +4,11 @@ import jwt
 import pytest
 from werkzeug.security import check_password_hash
 
+from app.database.database import db
+from app.models.inventario import Inventario
+from app.models.reserva import Reserva
+from app.models.usuarios import Usuarios
+from app.pruebas_empleado.conftest import PASS_EMPLEADO, SECRET
 from app.routes.auth_bp import hash_password, is_sha256_hash, normalize_role_name
 from app.routes.usuarios_bp import is_sha256_hash as users_is_sha256_hash
 from app.routes.usuarios_bp import (
@@ -160,12 +165,6 @@ def test_validar_contrasena_nula():
 
 
 # Pruebas de Integración
-
-from app.database.database import db  # noqa: E402
-from app.models.inventario import Inventario  # noqa: E402
-from app.models.reserva import Reserva  # noqa: E402
-from app.models.usuarios import Usuarios  # noqa: E402
-from app.pruebas_empleado.conftest import PASS_EMPLEADO, SECRET  # noqa: E402
 
 
 # INT-EMP-01: login HTTP + consulta de usuario + generación de token JWT.
