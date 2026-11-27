@@ -1,0 +1,192 @@
+name: 02 - CI/CD Deploy EC2
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+  APP_DIR: /opt/flaskapp
+
+jobs:
+  lint:
+    name: Linter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Instalar herramientas de estilo
+        run: pip install flake8 black isort
+
+      - name: Revisar formato con black
+        run: black --check .
+
+      - name: Revisar orden de imports con isort
+        run: isort --check-only --profile black .
+
+      - name: Revisar errores de estilo con flake8
+        run: flake8 . --max-line-length=100 --exclude=venv
+
+  unit-tests:
+    name: Unit Tests
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt pytest pytest-cov
+
+      - name: Ejecutar pruebas unitarias
+        env:
+          DATABASE_URL: "sqlite:///:memory:"
+          SECRET_KEY: test
+        run: pytest tests/unit --cov=. --cov-report=xml --junitxml=unit-results.xml
+
+      - name: Guardar reportes de pruebas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: |
+            unit-results.xml
+            coverage.xml
+
+  integration-tests:
+    name: Integration Tests
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: app_test
+          MYSQL_USER: app
+          MYSQL_PASSWORD: app
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s --health-timeout=5s --health-retries=5
+    env:
+      DATABASE_URL: mysql+pymysql://app:app@127.0.0.1:3306/app_test
+      SECRET_KEY: test
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt pytest pytest-cov
+
+      - name: Ejecutar pruebas de integración
+        run: pytest tests/integration --junitxml=integration-results.xml
+
+      - name: Guardar reportes de pruebas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: integration-results.xml
+
+  deploy:
+    name: Deploy
+    needs: integration-tests
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar carpeta de releases
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_DIR: ${{ env.APP_DIR }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: APP_DIR
+          script: |
+            set -euo pipefail
+            mkdir -p "$APP_DIR/releases"
+
+      - name: Subir código a la carpeta de release
+        uses: burnett01/rsync-deployments@7.0.1
+        with:
+          switches: -az --delete --exclude=.git --exclude=.github --exclude=tests --exclude=venv
+          path: ./
+          remote_path: ${{ env.APP_DIR }}/releases/${{ github.sha }}/
+          remote_host: ${{ secrets.EC2_HOST }}
+          remote_user: ${{ secrets.EC2_USER }}
+          remote_key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Instalar dependencias, activar release y verificar
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_DIR: ${{ env.APP_DIR }}
+          SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: APP_DIR,SHA
+          script: |
+            set -euo pipefail
+            REL="$APP_DIR/releases/$SHA"
+
+            sudo -u flaskapp "$APP_DIR/venv/bin/pip" install -q -r "$REL/requirements.txt"
+
+            PREV=""
+            if [ -L "$APP_DIR/app" ]; then
+              PREV=$(readlink -f "$APP_DIR/app")
+            else
+              sudo rm -rf "$APP_DIR/app"
+            fi
+
+            ln -sfn "$REL" "$APP_DIR/app"
+            sudo systemctl restart flaskapp
+
+            for i in 1 2 3 4 5 6; do
+              sleep 5
+              if curl -fsS http://localhost/health; then
+                echo
+                echo "Release $SHA activa"
+                ls -1dt "$APP_DIR"/releases/* | tail -n +6 | xargs -r rm -rf
+                exit 0
+              fi
+            done
+
+            echo "Health check falló -> rollback a ${PREV:-ninguna}"
+            if [ -n "$PREV" ] && [ "$PREV" != "$REL" ]; then
+              ln -sfn "$PREV" "$APP_DIR/app"
+              sudo systemctl restart flaskapp
+            fi
+            exit 1
